@@ -90,23 +90,23 @@ def parse_tuple(s: Union[str, Tuple[int, int]]) -> Tuple[int, int]:
 @click.option('--nrr', type=int, help='Neural rendering resolution override', default=None, show_default=True)
 #@click.option('--light_sh', 'light_sh',type=str, help='input the relight sh', default="a person with blue hair", show_default=True)
 @click.option('--description', 'description',type=str, help='input the text prompt', default="a lady with a pair of glasses", show_default=True)
-@click.option('--lamda_id', type=float,
+@click.option('--lambda_id', type=float,
               help='id loss wright', default=0.6, show_default=True)
-@click.option('--lamda_origin', type=float,
+@click.option('--lambda_origin', type=float,
               help='origin loss wright', default=0.6, show_default=True)
-@click.option('--lamda_diffusion', type=float,
+@click.option('--lambda_diffusion', type=float,
               help='diffusion loss wright', default=6e-05, show_default=True) #9e-05
-@click.option('--lamda_illumination', type=float,
+@click.option('--lambda_illumination', type=float,
               help='illumination loss weight', default=0.0, show_default=True)
 @click.option('--pp', type=float,
               help='Privacy parameter for de-id [0=max privacy, 1=min]', default=0.0, show_default=True)
-@click.option('--lamda_deid', type=float,
+@click.option('--lambda_deid', type=float,
               help='De-identification loss weight', default=2.5, show_default=True)
-@click.option('--lamda_gender', type=float,
+@click.option('--lambda_gender', type=float,
               help='Gender preservation loss weight', default=0.01, show_default=True)
-@click.option('--lamda_expr', type=float,
+@click.option('--lambda_expr', type=float,
               help='Expression preservation loss weight', default=0.01, show_default=True)
-@click.option('--lamda_latent', type=float,
+@click.option('--lambda_latent', type=float,
               help='Latent regularizer loss weight', default=0.0016, show_default=True)
 @click.option('--mode', type=click.Choice(['deid', 'edit']),
               help='Mode: deid (de-identification) or edit (original editing)', default='deid', show_default=True)
@@ -120,15 +120,15 @@ def run(
         num_steps:int,
         num_steps_pti:int,
         description:str,
-        lamda_id: float,
-        lamda_origin: float,
-        lamda_diffusion: float,
-        lamda_illumination: float,
+        lambda_id: float,
+        lambda_origin: float,
+        lambda_diffusion: float,
+        lambda_illumination: float,
         pp: float,
-        lamda_deid: float,
-        lamda_gender: float,
-        lamda_expr: float,
-        lamda_latent: float,
+        lambda_deid: float,
+        lambda_gender: float,
+        lambda_expr: float,
+        lambda_latent: float,
         mode: str,
 ):
     """Render a latent vector interpolation video.
@@ -182,24 +182,24 @@ def run(
 
     deid_loss_fn = DeIDLoss(pp=pp)
     attr_loss_fn = AttrLoss()
-    outdir = os.path.join(outdir, f"{image_name}_deid_pp{pp}_{lamda_deid}_{lamda_origin}_{lamda_gender}_{lamda_expr}")
+    outdir = os.path.join(outdir, f"{image_name}_deid_pp{pp}_{lambda_deid}_{lambda_origin}_{lambda_gender}_{lambda_expr}")
     os.makedirs(outdir, exist_ok=True)
 
     w_plus = w_plus_editor.project(
         G, c, outdir, id_image, device=torch.device('cuda'),
         w_avg_samples=600, w_name=image_name, num_steps=num_steps,
         deid_loss=deid_loss_fn, attr_loss=attr_loss_fn,
-        lamda_deid=lamda_deid, lamda_origin=lamda_origin,
-        lamda_gender=lamda_gender, lamda_expr=lamda_expr,
-        lamda_latent=lamda_latent)
+        lambda_deid=lambda_deid, lambda_origin=lambda_origin,
+        lambda_gender=lambda_gender, lambda_expr=lambda_expr,
+        lambda_latent=lambda_latent)
 
     G_final = w_plus_editor.project_pti(
         G, c, outdir, id_image, w_plus, device=torch.device('cuda'),
         w_avg_samples=600, w_name=image_name, num_steps_pti=num_steps_pti,
         deid_loss=deid_loss_fn, attr_loss=attr_loss_fn,
-        lamda_deid=lamda_deid, lamda_origin=lamda_origin,
-        lamda_gender=lamda_gender, lamda_expr=lamda_expr,
-        lamda_latent=lamda_latent)
+        lambda_deid=lambda_deid, lambda_origin=lambda_origin,
+        lambda_gender=lambda_gender, lambda_expr=lambda_expr,
+        lambda_latent=lambda_latent)
     
     outdir_ckeckpoints = os.path.join(outdir,"checkpoints")
     os.makedirs(outdir_ckeckpoints, exist_ok=True)
