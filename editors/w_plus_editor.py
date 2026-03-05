@@ -68,11 +68,17 @@ def project(
         relight_model,
         illu_loss,
         id_loss,
+        deid_loss,
+        attr_loss,
         guidance,
         lamda_id,
         lamda_origin,
         lamda_diffusion,
-        lamda_illumination,        
+        lamda_illumination,
+        lambda_deid,
+        lambda_gender,
+        lambda_expr,
+        lambda_latent,
 ):
     outdir = os.path.join(outdir, "pre")
     os.makedirs(outdir, exist_ok=True)
@@ -86,11 +92,19 @@ def project(
     weight_of_d_loss = lamda_diffusion
     weight_of_original_loss = lamda_origin
     weight_of_illu_loss = lamda_illumination
+    weight_of_deid_loss = lambda_deid
+    weight_of_gender_loss = lambda_gender
+    weight_of_expr_loss = lambda_expr
+    weight_of_latent_reg = lambda_latent
     
     logging.info("weight_of_i_loss: "+str(weight_of_i_loss))
     logging.info("weight_of_d_loss: "+str(weight_of_d_loss))
     logging.info("weight_of_original_loss: "+str(weight_of_original_loss))
     logging.info("weight_of_illu_loss: "+str(weight_of_illu_loss))
+    logging.info("weight_of_deid_loss: "+str(weight_of_deid_loss))
+    logging.info("weight_of_gender_loss: "+str(weight_of_gender_loss))
+    logging.info("weight_of_expr_loss: "+str(weight_of_expr_loss))
+    logging.info("weight_of_latent_reg: "+str(weight_of_latent_reg))
 
     assert target.shape == (G.img_channels, G.img_resolution, G.img_resolution)
     G = copy.deepcopy(G).eval().requires_grad_(False).to(device).float() # type: ignore
@@ -184,15 +198,30 @@ def project(
         # Features for synth images.
         synth_features = vgg16(synth_images, resize_images=False, return_lpips=True)
         original_loss = (target_features - synth_features).square().sum()
-        #Diffussion loss and ID loss
-        
-        text_inputs = guidance.get_text_embeds([text_prompt], [""])
-        i_loss = id_loss(synth_images*2/255.0-1,target_images*2/255.0-1)[0]
-        
-        dist = i_loss*weight_of_i_loss + original_loss*weight_of_original_loss
-        logging.info(str(step)+" i_loss: "+str(i_loss.cpu().detach()))
+
+        # Normalise synth/target to [-1, 1] for identity & attribute losses
+        synth_images_norm = synth_images * 2 / 255.0 - 1
+        target_images_norm = target_images * 2 / 255.0 - 1
+
+        # De-identification loss (Eq. 6)
+        deid_val, mean_dist = deid_loss(synth_images_norm, target_images_norm)
+        # Attribute preservation losses (Eq. 7 & 8)
+        gender_loss, expr_loss = attr_loss(synth_images_norm, target_images_norm)
+        # Latent regularizer (L_LT = ||w - w_avg||^2)
+        latent_reg = (w_opt - w_avg_tensor).square().sum()
+
+        dist = (original_loss * weight_of_original_loss
+                + deid_val * weight_of_deid_loss
+                + gender_loss * weight_of_gender_loss
+                + expr_loss * weight_of_expr_loss
+                + latent_reg * weight_of_latent_reg)
+
+        logging.info(str(step)+" deid_loss: "+str(deid_val.cpu().detach()))
+        logging.info(str(step)+" mean_dist: "+str(mean_dist.cpu().detach()))
+        logging.info(str(step)+" gender_loss: "+str(gender_loss.cpu().detach()))
+        logging.info(str(step)+" expr_loss: "+str(expr_loss.cpu().detach()))
+        logging.info(str(step)+" latent_reg: "+str(latent_reg.cpu().detach()))
         logging.info(str(step)+" original_loss: "+str(original_loss.cpu().detach()))
-        #logging.debug(str(step)+" illu_loss: "+str(ill_loss))
         ############ Other views clip loss:
         #print("camera pose",c.shape)
         
@@ -214,6 +243,7 @@ def project(
         PIL.Image.fromarray(vis_img[0].cpu().numpy(), 'RGB').save(f'{outdir}/{step}.png')
         #################
         #diffusion loss
+        text_inputs = guidance.get_text_embeds([text_prompt], [""])
         d_loss,real_d_loss = guidance.train_step(text_inputs, side_synth_images, as_latent=False)
         logging.info(str(step)+" d_loss*0.001: "+str(f'{real_d_loss.cpu().detach():.20f}'))
         dist = dist + d_loss[0] * weight_of_d_loss
@@ -284,11 +314,16 @@ def project_pti(
         relight_model,
         illu_loss,
         id_loss,
+        deid_loss,
+        attr_loss,
         guidance,
         lamda_id,
         lamda_origin,
         lamda_diffusion,
         lamda_illumination,
+        lambda_deid,
+        lambda_gender,
+        lambda_expr,
 ):
     outdir = os.path.join(outdir, "post")
     os.makedirs(outdir, exist_ok=True)
@@ -302,11 +337,17 @@ def project_pti(
     weight_of_d_loss = lamda_diffusion
     weight_of_original_loss = lamda_origin
     weight_of_illu_loss = lamda_illumination
+    weight_of_deid_loss = lambda_deid
+    weight_of_gender_loss = lambda_gender
+    weight_of_expr_loss = lambda_expr
     
     logging.info("weight_of_i_loss: "+str(weight_of_i_loss))  
     logging.info("weight_of_d_loss: "+str(weight_of_d_loss))
     logging.info("weight_of_original_loss: "+str(weight_of_original_loss))
     logging.info("weight_of_illu_loss: "+str(weight_of_illu_loss))
+    logging.info("weight_of_deid_loss: "+str(weight_of_deid_loss))
+    logging.info("weight_of_gender_loss: "+str(weight_of_gender_loss))
+    logging.info("weight_of_expr_loss: "+str(weight_of_expr_loss))
     ###################################
     
 
@@ -347,10 +388,10 @@ def project_pti(
         target_images = F.interpolate(target_images_orginal_illu, size=(256, 256), mode='area')
     target_features = vgg16(target_images, resize_images=False, return_lpips=True).to(torch.device('cuda:1'))
     vgg16 = vgg16.to(torch.device('cuda:1'))
-    id_loss = id_loss.to(torch.device('cuda:1'))
+    deid_loss = deid_loss.to(torch.device('cuda:1'))
+    attr_loss = attr_loss.to(torch.device('cuda:1'))
     target_images = target_images.to(torch.device('cuda:1'))
     torch.cuda.empty_cache()
-    # target_id_features = 
 
     # start_w = np.repeat(start_w, G.backbone.mapping.num_ws, axis=1)
     # w_opt = torch.tensor(start_w, dtype=torch.float32, device=device,
@@ -394,11 +435,23 @@ def project_pti(
         
         synth_features = vgg16(synth_images, resize_images=False, return_lpips=True)
         original_loss = (target_features - synth_features).square().sum()
-        #Diffussion loss and ID loss
-        
-        i_loss = id_loss(synth_images*2/255.0-1,target_images*2/255.0-1)[0]
-        dist = original_loss*weight_of_original_loss +  i_loss*weight_of_i_loss 
-        logging.info(str(step)+" i_loss: "+str(i_loss.cpu().detach()))
+
+        # Normalise synth/target to [-1, 1] for identity & attribute losses
+        synth_images_norm = synth_images * 2 / 255.0 - 1
+        target_images_norm = target_images * 2 / 255.0 - 1
+
+        deid_val, mean_dist = deid_loss(synth_images_norm, target_images_norm)
+        gender_loss, expr_loss = attr_loss(synth_images_norm, target_images_norm)
+
+        dist = (original_loss * weight_of_original_loss
+                + deid_val * weight_of_deid_loss
+                + gender_loss * weight_of_gender_loss
+                + expr_loss * weight_of_expr_loss)
+
+        logging.info(str(step)+" deid_loss: "+str(deid_val.cpu().detach()))
+        logging.info(str(step)+" mean_dist: "+str(mean_dist.cpu().detach()))
+        logging.info(str(step)+" gender_loss: "+str(gender_loss.cpu().detach()))
+        logging.info(str(step)+" expr_loss: "+str(expr_loss.cpu().detach()))
         logging.info(str(step)+" original_loss: "+str(original_loss.cpu().detach()))
  
         ############ Other views clip loss:
