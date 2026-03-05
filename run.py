@@ -37,6 +37,8 @@ from utils_SH import *
 from defineHourglass_512_gray_skip import *
 #from criteria.clip_loss import CLIPLoss
 from criteria.id_loss import IDLoss
+from criteria.deid_loss import DeIDLoss
+from criteria.attr_loss import AttrLoss
 from criteria.illu_loss import illu_loss
 from criteria.sd import StableDiffusion
 # ----------------------------------------------------------------------------
@@ -95,7 +97,19 @@ def parse_tuple(s: Union[str, Tuple[int, int]]) -> Tuple[int, int]:
 @click.option('--lamda_diffusion', type=float,
               help='diffusion loss wright', default=6e-05, show_default=True) #9e-05
 @click.option('--lamda_illumination', type=float,
-              help='diffusion loss wright', default=0.0, show_default=True) #0.1
+              help='illumination loss weight', default=0.0, show_default=True)
+@click.option('--pp', type=float,
+              help='Privacy parameter for de-id [0=max privacy, 1=min]', default=0.0, show_default=True)
+@click.option('--lamda_deid', type=float,
+              help='De-identification loss weight', default=2.5, show_default=True)
+@click.option('--lamda_gender', type=float,
+              help='Gender preservation loss weight', default=0.01, show_default=True)
+@click.option('--lamda_expr', type=float,
+              help='Expression preservation loss weight', default=0.01, show_default=True)
+@click.option('--lamda_latent', type=float,
+              help='Latent regularizer loss weight', default=0.0016, show_default=True)
+@click.option('--mode', type=click.Choice(['deid', 'edit']),
+              help='Mode: deid (de-identification) or edit (original editing)', default='deid', show_default=True)
 def run(
         network_pkl: str,
         outdir: str,
@@ -109,7 +123,13 @@ def run(
         lamda_id: float,
         lamda_origin: float,
         lamda_diffusion: float,
-        lamda_illumination: float
+        lamda_illumination: float,
+        pp: float,
+        lamda_deid: float,
+        lamda_gender: float,
+        lamda_expr: float,
+        lamda_latent: float,
+        mode: str,
 ):
     """Render a latent vector interpolation video.
     Examples:
@@ -158,21 +178,28 @@ def run(
    
     relight_model = HourglassNet()
     relight_model.load_state_dict(torch.load("./networks/trained_model_03.t7"))
-    
-    id_loss = IDLoss()
-    guidance = StableDiffusion(torch.device('cuda'), True, False, '2.1', None, [0.02, 0.98])
     relight_model = relight_model.to(torch.device('cuda'))
-    outdir = os.path.join(outdir, image_name+description+str(lamda_id)+" "+str(lamda_origin)+" "+str(lamda_diffusion)+" "+str(lamda_illumination))
+
+    deid_loss_fn = DeIDLoss(pp=pp)
+    attr_loss_fn = AttrLoss()
+    outdir = os.path.join(outdir, f"{image_name}_deid_pp{pp}_{lamda_deid}_{lamda_origin}_{lamda_gender}_{lamda_expr}")
     os.makedirs(outdir, exist_ok=True)
-    w_plus = w_plus_editor.project(G, c,outdir, id_image, device=torch.device('cuda'), w_avg_samples=600, w_name=image_name,num_steps = num_steps,\
-        text_prompt = description, relight_model = relight_model,illu_loss = illu_loss, id_loss = id_loss,guidance=guidance,\
-        lamda_id = lamda_id,lamda_origin=lamda_origin, lamda_diffusion=lamda_diffusion, lamda_illumination = lamda_illumination)
-    guidance = StableDiffusion(torch.device('cuda:1'), True, False, '2.1', None, [0.02, 0.98])
-    relight_model = relight_model.to(torch.device('cuda:1'))
-    
-    G_final = w_plus_editor.project_pti(G, c,outdir, id_image, w_plus,device=torch.device('cuda'), w_avg_samples=600, w_name=image_name,num_steps_pti = num_steps_pti,\
-        text_prompt = description, relight_model = relight_model,illu_loss = illu_loss, id_loss = id_loss,guidance=guidance,\
-        lamda_id = lamda_id,lamda_origin=lamda_origin, lamda_diffusion=lamda_diffusion, lamda_illumination = lamda_illumination)
+
+    w_plus = w_plus_editor.project(
+        G, c, outdir, id_image, device=torch.device('cuda'),
+        w_avg_samples=600, w_name=image_name, num_steps=num_steps,
+        deid_loss=deid_loss_fn, attr_loss=attr_loss_fn,
+        lamda_deid=lamda_deid, lamda_origin=lamda_origin,
+        lamda_gender=lamda_gender, lamda_expr=lamda_expr,
+        lamda_latent=lamda_latent)
+
+    G_final = w_plus_editor.project_pti(
+        G, c, outdir, id_image, w_plus, device=torch.device('cuda'),
+        w_avg_samples=600, w_name=image_name, num_steps_pti=num_steps_pti,
+        deid_loss=deid_loss_fn, attr_loss=attr_loss_fn,
+        lamda_deid=lamda_deid, lamda_origin=lamda_origin,
+        lamda_gender=lamda_gender, lamda_expr=lamda_expr,
+        lamda_latent=lamda_latent)
     
     outdir_ckeckpoints = os.path.join(outdir,"checkpoints")
     os.makedirs(outdir_ckeckpoints, exist_ok=True)
