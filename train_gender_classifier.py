@@ -34,6 +34,14 @@ MALE_ATTR_IDX = 20
 
 
 class CelebAGender(CelebA):
+    def _check_integrity(self) -> bool:
+        """Skip MD5 check — files from Kaggle have different hashes."""
+        for _, _, filename, _ in self.file_list:
+            fpath = os.path.join(self.root, self.base_folder, filename)
+            if not os.path.exists(fpath):
+                return False
+        return True
+
     def __getitem__(self, index):
         img, attrs = super().__getitem__(index)
         gender = attrs[MALE_ATTR_IDX].long()  # 0 = female, 1 = male
@@ -61,7 +69,7 @@ def build_dataloaders(data_dir: str, batch_size: int, num_workers: int):
     train_ds = CelebAGender(root=data_dir, split="train",
                             target_type="attr",
                             transform=train_transform,
-                            download=True)
+                            download=False)
     val_ds = CelebAGender(root=data_dir, split="valid",
                           target_type="attr",
                           transform=val_transform,
