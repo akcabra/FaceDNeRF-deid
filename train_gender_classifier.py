@@ -7,44 +7,67 @@ Usage
 -----
     python train_gender_classifier.py --data_dir ./data/celeba
 
-CelebA will be auto-downloaded by torchvision on the first run
-(~1.4 GB images + annotations). If automatic download fails,
-manually download from https://mmlab.ie.cuhk.edu.hk/projects/CelebA.html
-and place files under <data_dir>/celeba/.
+Expects the Kaggle CelebA layout:
+    <data_dir>/
+        img_align_celeba/img_align_celeba/000001.jpg ...
+        list_attr_celeba.csv
+        list_eval_partition.csv
 
 The best model (by validation accuracy) is saved to
     ./networks/gender_classifier.pth
 """
 
 import argparse
+import csv
 import os
 import time
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
+from PIL import Image
 import torchvision.models as models
 import torchvision.transforms as transforms
-from torchvision.datasets import CelebA
 
 
-# CelebA attribute index for "Male"
-MALE_ATTR_IDX = 20
+class CelebAGender(Dataset):
+    SPLIT_MAP = {"train": 0, "valid": 1, "test": 2}
 
+    def __init__(self, data_dir: str, split: str, transform=None):
+        super().__init__()
+        assert split in self.SPLIT_MAP
+        self.img_dir = os.path.join(data_dir, "img_align_celeba", "img_align_celeba")
+        self.transform = transform
 
-class CelebAGender(CelebA):
-    def _check_integrity(self) -> bool:
-        """Skip MD5 check — files from Kaggle have different hashes."""
-        for _, _, filename, _ in self.file_list:
-            fpath = os.path.join(self.root, self.base_folder, filename)
-            if not os.path.exists(fpath):
-                return False
-        return True
+        # Read partition file
+        partition_path = os.path.join(data_dir, "list_eval_partition.csv")
+        partitions = {}
+        with open(partition_path, "r") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                partitions[row["image_id"]] = int(row["partition"])
+
+        # Read attribute file — "Male" column; values are -1/1, map to 0/1
+        attr_path = os.path.join(data_dir, "list_attr_celeba.csv")
+        self.samples = []
+        split_id = self.SPLIT_MAP[split]
+        with open(attr_path, "r") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                fname = row["image_id"]
+                if partitions.get(fname) == split_id:
+                    gender = 1 if int(row["Male"]) == 1 else 0
+                    self.samples.append((fname, gender))
+
+    def __len__(self):
+        return len(self.samples)
 
     def __getitem__(self, index):
-        img, attrs = super().__getitem__(index)
-        gender = attrs[MALE_ATTR_IDX].long()  # 0 = female, 1 = male
+        fname, gender = self.samples[index]
+        img = Image.open(os.path.join(self.img_dir, fname)).convert("RGB")
+        if self.transform:
+            img = self.transform(img)
         return img, gender
 
 
@@ -66,18 +89,9 @@ def build_dataloaders(data_dir: str, batch_size: int, num_workers: int):
                              std=[0.229, 0.224, 0.225]),
     ])
 
-    train_ds = CelebAGender(root=data_dir, split="train",
-                            target_type="attr",
-                            transform=train_transform,
-                            download=False)
-    val_ds = CelebAGender(root=data_dir, split="valid",
-                          target_type="attr",
-                          transform=val_transform,
-                          download=False)
-    test_ds = CelebAGender(root=data_dir, split="test",
-                           target_type="attr",
-                           transform=val_transform,
-                           download=False)
+    train_ds = CelebAGender(data_dir, split="train", transform=train_transform)
+    val_ds = CelebAGender(data_dir, split="valid", transform=val_transform)
+    test_ds = CelebAGender(data_dir, split="test", transform=val_transform)
 
     train_loader = DataLoader(train_ds, batch_size=batch_size,
                               shuffle=True, num_workers=num_workers,

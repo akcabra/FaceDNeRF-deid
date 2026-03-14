@@ -179,27 +179,37 @@ def run(
     relight_model = HourglassNet()
     relight_model.load_state_dict(torch.load("./networks/trained_model_03.t7"))
     relight_model = relight_model.to(torch.device('cuda'))
+    guidance = StableDiffusion(torch.device('cuda'), fp16=True, vram_O=False)
 
     deid_loss_fn = DeIDLoss(pp=pp)
     attr_loss_fn = AttrLoss()
-    outdir = os.path.join(outdir, f"{image_name}_deid_pp{pp}_{lambda_deid}_{lambda_origin}_{lambda_gender}_{lambda_expr}")
+    outdir = os.path.join(outdir, f"{image_name}_deid_pp{pp}_{lambda_deid}_{lamda_origin}_{lambda_gender}_{lambda_expr}")
     os.makedirs(outdir, exist_ok=True)
 
     w_plus = w_plus_editor.project(
         G, c, outdir, id_image, device=torch.device('cuda'),
         w_avg_samples=600, w_name=image_name, num_steps=num_steps,
+        text_prompt=description, relight_model=relight_model,
+        illu_loss=illu_loss,
         deid_loss=deid_loss_fn, attr_loss=attr_loss_fn,
-        lambda_deid=lambda_deid, lambda_origin=lambda_origin,
+        guidance=guidance, lamda_id=lambda_id,
+        lamda_origin=lambda_origin, lamda_diffusion=lambda_diffusion,
+        lamda_illumination=lambda_illumination,
+        lambda_deid=lambda_deid,
         lambda_gender=lambda_gender, lambda_expr=lambda_expr,
         lambda_latent=lambda_latent)
 
     G_final = w_plus_editor.project_pti(
         G, c, outdir, id_image, w_plus, device=torch.device('cuda'),
         w_avg_samples=600, w_name=image_name, num_steps_pti=num_steps_pti,
+        text_prompt=description, relight_model=relight_model,
+        illu_loss=illu_loss,
         deid_loss=deid_loss_fn, attr_loss=attr_loss_fn,
-        lambda_deid=lambda_deid, lambda_origin=lambda_origin,
-        lambda_gender=lambda_gender, lambda_expr=lambda_expr,
-        lambda_latent=lambda_latent)
+        guidance=guidance, lamda_id=lambda_id,
+        lamda_origin=lambda_origin, lamda_diffusion=lambda_diffusion,
+        lamda_illumination=lambda_illumination,
+        lambda_deid=lambda_deid,
+        lambda_gender=lambda_gender, lambda_expr=lambda_expr)
     
     outdir_ckeckpoints = os.path.join(outdir,"checkpoints")
     os.makedirs(outdir_ckeckpoints, exist_ok=True)
