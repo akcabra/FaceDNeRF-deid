@@ -89,23 +89,23 @@ def parse_tuple(s: Union[str, Tuple[int, int]]) -> Tuple[int, int]:
 @click.option('--nrr', type=int, help='Neural rendering resolution override', default=None, show_default=True)
 #@click.option('--light_sh', 'light_sh',type=str, help='input the relight sh', default="a person with blue hair", show_default=True)
 @click.option('--description', 'description',type=str, help='input the text prompt', default="a lady with a pair of glasses", show_default=True)
-@click.option('--lambda_id', type=float,
+@click.option('--lambda_id', '--lamda_id', 'lambda_id', type=float,
               help='id loss wright', default=0.6, show_default=True)
-@click.option('--lambda_origin', type=float,
+@click.option('--lambda_origin', '--lamda_origin', 'lambda_origin', type=float,
               help='origin loss wright', default=0.6, show_default=True)
-@click.option('--lambda_diffusion', type=float,
+@click.option('--lambda_diffusion', '--lamda_diffusion', 'lambda_diffusion', type=float,
               help='diffusion loss wright', default=6e-05, show_default=True) #9e-05
-@click.option('--lambda_illumination', type=float,
+@click.option('--lambda_illumination', '--lamda_illumination', 'lambda_illumination', type=float,
               help='illumination loss weight', default=0.0, show_default=True)
 @click.option('--pp', type=float,
               help='Privacy parameter for de-id [0=max privacy, 1=min]', default=0.0, show_default=True)
-@click.option('--lambda_deid', type=float,
+@click.option('--lambda_deid', '--lamda_deid', 'lambda_deid', type=float,
               help='De-identification loss weight', default=2.5, show_default=True)
-@click.option('--lambda_gender', type=float,
+@click.option('--lambda_gender', '--lamda_gender', 'lambda_gender', type=float,
               help='Gender preservation loss weight', default=0.01, show_default=True)
-@click.option('--lambda_expr', type=float,
+@click.option('--lambda_expr', '--lamda_expr', 'lambda_expr', type=float,
               help='Expression preservation loss weight', default=0.01, show_default=True)
-@click.option('--lambda_latent', type=float,
+@click.option('--lambda_latent', '--lamda_latent', 'lambda_latent', type=float,
               help='Latent regularizer loss weight', default=0.0016, show_default=True)
 @click.option('--mode', type=click.Choice(['deid', 'edit']),
               help='Mode: deid (de-identification) or edit (original editing)', default='deid', show_default=True)

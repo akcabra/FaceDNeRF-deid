@@ -50,7 +50,7 @@ srun \
       --mode deid \
       --pp ${PP} \
       --lambda_deid ${lambda_DEID} \
-      --lamda_origin ${lambda_ORIGIN} \
+      --lambda_origin ${lambda_ORIGIN} \
       --lambda_gender ${lambda_GENDER} \
       --lambda_expr ${lambda_EXPR} \
       --lambda_latent ${lambda_LATENT}

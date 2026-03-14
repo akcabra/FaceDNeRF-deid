@@ -28,7 +28,7 @@ for image_id in image_ids:
         print(output_dir)
         command = "CUDA_VISIBLE_DEVICES=" + str(gpu_id1)+","+str(gpu_id2) + " python run.py --outdir='"+ output_dir + "' --network=/disk1/haozhang/EG3D-diffusion_zh/eg3d/networks/ffhqrebalanced512-128.pkl --sample_mult=2 \
             --image_path ./test_data/" + image_id + ".png --c_path ./test_data/" + image_id+ ".npy "+ " --num_steps "+str(num_steps)+" --num_steps_pti "+str(num_steps_pti)+" --description '"+ input_dict[i]["text"]+"' \
-                --lamda_id " + str(input_dict[i]["lamda_id"]) + " --lamda_origin " + str(input_dict[i]["lamda_origin"]) + " --lamda_diffusion " + str(input_dict[i]["lamda_diffusion"]) + " --lamda_illumination " + str(input_dict[i]["lamda_illumination"]) 
+                --lambda_id " + str(input_dict[i]["lamda_id"]) + " --lambda_origin " + str(input_dict[i]["lamda_origin"]) + " --lambda_diffusion " + str(input_dict[i]["lamda_diffusion"]) + " --lambda_illumination " + str(input_dict[i]["lamda_illumination"]) 
         print(command)
         os.system(command)
         print("End : %s" % time.ctime())
