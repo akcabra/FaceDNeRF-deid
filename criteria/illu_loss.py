@@ -11,6 +11,10 @@ def illu_loss(relight_model,sh,synth_images,device):  ####### input synth_images
     sh = np.reshape(sh, (1,9,1,1)).astype(np.float32)
     sh = torch.from_numpy(sh).to(device)
     sh.requires_grad = False
+    # Clamp to (eps, 1] so that torch.pow inside kornia's rgb_to_linear_rgb
+    # never receives a zero/negative base, which causes NaN in PowBackward0
+    # when PyTorch evaluates gradients through both branches of torch.where.
+    synth_images = synth_images.clamp(min=1e-6, max=1.0)
     Lab = kornia.color.rgb_to_lab(synth_images)
     Lab = Lab.squeeze()
     Lab = torch.permute(Lab, (1,2,0))
