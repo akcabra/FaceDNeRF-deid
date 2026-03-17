@@ -211,8 +211,13 @@ def run(
     os.makedirs(outdir_ckeckpoints, exist_ok=True)
     np.save(f'{outdir_ckeckpoints}/{image_name}.npy', w_plus.cpu().detach())
     
+    # Move every nn.Module in the dict to CPU before pickling so the checkpoint
+    # can be deserialized on CPU-only nodes (e.g. the video generation task).
+    network_data["G_ema"] = G_final.eval().requires_grad_(False).cpu()
+    for k, v in network_data.items():
+        if isinstance(v, torch.nn.Module):
+            network_data[k] = v.eval().requires_grad_(False).cpu()
     with open(f'{outdir_ckeckpoints}/fintuned_generator.pkl', 'wb') as f:
-        network_data["G_ema"] = G_final.eval().requires_grad_(False).cpu()
         pickle.dump(network_data, f)
     
     
