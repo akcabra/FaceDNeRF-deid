@@ -14,6 +14,7 @@ import click
 import pickle
 import re
 import copy
+import io
 import numpy as np
 import torch
 import dnnlib
@@ -22,7 +23,14 @@ from torch_utils import misc
 #----------------------------------------------------------------------------
 
 def load_network_pkl(f, force_fp16=False):
-    data = _LegacyUnpickler(f).load()
+    # Force storages inside legacy pickles to load on CPU first so files saved
+    # on CUDA machines can be deserialized on CPU-only nodes.
+    old_load_from_bytes = torch.storage._load_from_bytes
+    torch.storage._load_from_bytes = lambda b: torch.load(io.BytesIO(b), map_location='cpu')
+    try:
+        data = _LegacyUnpickler(f).load()
+    finally:
+        torch.storage._load_from_bytes = old_load_from_bytes
 
     # Legacy TensorFlow pickle => convert.
     if isinstance(data, tuple) and len(data) == 3 and all(isinstance(net, _TFNetworkStub) for net in data):
