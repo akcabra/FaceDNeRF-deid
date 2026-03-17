@@ -253,7 +253,7 @@ def project(
 
         # Step
         optimizer.zero_grad(set_to_none=True)
-        loss.backward(retain_graph=True)
+        loss.backward()
         #torch.nn.utils.clip_grad_norm(w_opt, 1)
         optimizer.step()
         
@@ -468,7 +468,7 @@ def project_pti(
 
         # Step
         optimizer.zero_grad(set_to_none=True)
-        loss.backward(retain_graph=True)
+        loss.backward()
         #torch.nn.utils.clip_grad_norm(w_opt, 1)
         optimizer.step()
         
