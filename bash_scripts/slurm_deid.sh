@@ -33,10 +33,23 @@ RESULT_DIR="${OUTDIR}/${IMAGE_ID}_deid_pp${PP}_${lambda_DEID}_${lambda_ORIGIN}_$
 echo "Image=${IMAGE_ID} pp=${PP} GPUs=${CUDA_VISIBLE_DEVICES:-auto}"
 
 srun \
+  --gres=gpu:2 \
   --container-image "${CONTAINER}" \
   --container-mounts "${PWD}":"${PWD}" \
   --container-workdir "${PWD}" \
   bash -c "
+    set -euo pipefail
+    echo '[diag] nvidia-smi:'
+    nvidia-smi || true
+    python - <<'PY'
+    import torch
+    print('[diag] torch:', torch.__version__)
+    print('[diag] torch.cuda:', torch.version.cuda)
+    print('[diag] cuda_available:', torch.cuda.is_available())
+    print('[diag] device_count:', torch.cuda.device_count())
+    if not torch.cuda.is_available():
+        raise SystemExit('CUDA is not available inside container step. Check Slurm/Pyxis GPU passthrough.')
+    PY
     pip install --no-cache-dir -q --force-reinstall huggingface-hub==0.13.4
     pip install --no-cache-dir -q -r requirements.txt
     python run.py \
