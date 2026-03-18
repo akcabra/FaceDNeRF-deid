@@ -12,7 +12,6 @@
 """Generate lerp videos using pretrained network pickle."""
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 import re
 from typing import List, Optional, Tuple, Union
 
