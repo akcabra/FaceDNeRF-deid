@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:2
 #SBATCH --mem=48G
-#SBATCH --time=00:20:00
+#SBATCH --time=08:00:00
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 
@@ -41,15 +41,15 @@ srun \
     set -euo pipefail
     echo '[diag] nvidia-smi:'
     nvidia-smi || true
-    python - <<'PY'
-    import torch
-    print('[diag] torch:', torch.__version__)
-    print('[diag] torch.cuda:', torch.version.cuda)
-    print('[diag] cuda_available:', torch.cuda.is_available())
-    print('[diag] device_count:', torch.cuda.device_count())
-    if not torch.cuda.is_available():
-        raise SystemExit('CUDA is not available inside container step. Check Slurm/Pyxis GPU passthrough.')
-    PY
+python - <<'PY'
+import torch
+print('[diag] torch:', torch.__version__)
+print('[diag] torch.cuda:', torch.version.cuda)
+print('[diag] cuda_available:', torch.cuda.is_available())
+print('[diag] device_count:', torch.cuda.device_count())
+if not torch.cuda.is_available():
+    raise SystemExit('CUDA is not available inside container step. Check Slurm/Pyxis GPU passthrough.')
+PY
     pip install --no-cache-dir -q --force-reinstall huggingface-hub==0.13.4
     pip install --no-cache-dir -q -r requirements.txt
     python run.py \
