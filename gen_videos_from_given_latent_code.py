@@ -12,7 +12,6 @@
 """Generate lerp videos using pretrained network pickle."""
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 import re
 from typing import List, Optional, Tuple, Union
 
@@ -291,7 +290,7 @@ def generate_images(
         os.makedirs(outdir, exist_ok=True)
 
     print('Loading networks from "%s"...' % network_pkl)
-    device = torch.device('cuda')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     if 'pkl' in network_pkl:
         with dnnlib.util.open_url(network_pkl) as f:

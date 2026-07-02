@@ -4,9 +4,10 @@
 kornia==0.6.12
 lpips==0.1.4
 diffusers==0.14.0
+huggingface-hub==0.13.4
 transformers==4.27.4
 accelerate==0.18.0
-mediapipe==0.9.3.0
+mediapipe==0.10.5
 opencv-contrib-python==4.7.0.72
 ftfy==6.1.1
 pyspng==0.1.1

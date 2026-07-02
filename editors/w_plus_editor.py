@@ -64,16 +64,11 @@ def project(
         initial_w=None,
         image_log_step=1,
         w_name: str,
-        text_prompt:str,
         relight_model,
         illu_loss,
-        id_loss,
         deid_loss,
         attr_loss,
-        guidance,
-        lamda_id,
         lamda_origin,
-        lamda_diffusion,
         lamda_illumination,
         lambda_deid,
         lambda_gender,
@@ -88,8 +83,6 @@ def project(
     #################################
     #the hyperparameters: weight of i_loss, weight of d_loss, and weight of original_loss
     
-    weight_of_i_loss = lamda_id
-    weight_of_d_loss = lamda_diffusion
     weight_of_original_loss = lamda_origin
     weight_of_illu_loss = lamda_illumination
     weight_of_deid_loss = lambda_deid
@@ -97,8 +90,6 @@ def project(
     weight_of_expr_loss = lambda_expr
     weight_of_latent_reg = lambda_latent
     
-    logging.info("weight_of_i_loss: "+str(weight_of_i_loss))
-    logging.info("weight_of_d_loss: "+str(weight_of_d_loss))
     logging.info("weight_of_original_loss: "+str(weight_of_original_loss))
     logging.info("weight_of_illu_loss: "+str(weight_of_illu_loss))
     logging.info("weight_of_deid_loss: "+str(weight_of_deid_loss))
@@ -109,9 +100,6 @@ def project(
     assert target.shape == (G.img_channels, G.img_resolution, G.img_resolution)
     G = copy.deepcopy(G).eval().requires_grad_(False).to(device).float() # type: ignore
 
-    for p in guidance.parameters():
-        p.requires_grad = False
-    
     for p in relight_model.parameters():
         p.requires_grad = False    
     w_avg_path = './w_avg.npy'
@@ -241,18 +229,11 @@ def project(
         ################print out the sides views
         vis_img = side_synth_images_print.permute(0, 2, 3, 1).clamp(0, 255).to(torch.uint8)
         PIL.Image.fromarray(vis_img[0].cpu().numpy(), 'RGB').save(f'{outdir}/{step}.png')
-        #################
-        #diffusion loss
-        text_inputs = guidance.get_text_embeds([text_prompt], [""])
-        d_loss,real_d_loss = guidance.train_step(text_inputs, side_synth_images, as_latent=False)
-        logging.info(str(step)+" d_loss*0.001: "+str(f'{real_d_loss.cpu().detach():.20f}'))
-        dist = dist + d_loss[0] * weight_of_d_loss
-                
         ######################
         # illu loss
         sh = SH_project_polar_function(getLightIntensity,phi,theta)
         sh = np.array(sh) * 2.5
-        ill_loss = illu_loss(relight_model,sh,side_synth_images,torch.device('cuda')) #input sh (type numpy)
+        ill_loss = illu_loss(relight_model,sh,side_synth_images,device) #input sh (type numpy)
         logging.info(str(step)+" illu loss: "+str(f'{ill_loss.cpu().detach():.20f}'))
         
         dist = dist + ill_loss * weight_of_illu_loss
@@ -272,7 +253,7 @@ def project(
 
         # Step
         optimizer.zero_grad(set_to_none=True)
-        loss.backward(retain_graph=True)
+        loss.backward()
         #torch.nn.utils.clip_grad_norm(w_opt, 1)
         optimizer.step()
         
@@ -310,16 +291,11 @@ def project_pti(
         initial_w=None,
         image_log_step=1,
         w_name: str,
-        text_prompt:str,
         relight_model,
         illu_loss,
-        id_loss,
         deid_loss,
         attr_loss,
-        guidance,
-        lamda_id,
         lamda_origin,
-        lamda_diffusion,
         lamda_illumination,
         lambda_deid,
         lambda_gender,
@@ -333,16 +309,12 @@ def project_pti(
     #################################
     #the hyperparameters: weight of i_loss, weight of d_loss, and weight of original_loss
     
-    weight_of_i_loss = lamda_id
-    weight_of_d_loss = lamda_diffusion
     weight_of_original_loss = lamda_origin
     weight_of_illu_loss = lamda_illumination
     weight_of_deid_loss = lambda_deid
     weight_of_gender_loss = lambda_gender
     weight_of_expr_loss = lambda_expr
     
-    logging.info("weight_of_i_loss: "+str(weight_of_i_loss))  
-    logging.info("weight_of_d_loss: "+str(weight_of_d_loss))
     logging.info("weight_of_original_loss: "+str(weight_of_original_loss))
     logging.info("weight_of_illu_loss: "+str(weight_of_illu_loss))
     logging.info("weight_of_deid_loss: "+str(weight_of_deid_loss))
@@ -358,13 +330,9 @@ def project_pti(
     torch.cuda.empty_cache()
     optimizer = torch.optim.Adam(G.parameters(), betas=(0.9, 0.999),
                                  lr=initial_learning_rate)
-    for p in guidance.parameters():
-        p.requires_grad = False
-    
     for p in relight_model.parameters():
         p.requires_grad = False    
-    ##set the requires_grad of guidance to false
-    ##
+
     # Compute w stats.
     camera_lookat_point = torch.tensor(G.rendering_kwargs['avg_camera_pivot'], device=device)
     cam2world_pose = LookAtPoseSampler.sample(3.14 / 2, 3.14 / 2, camera_lookat_point,
@@ -386,11 +354,11 @@ def project_pti(
    
     if target_images_orginal_illu.shape[2] > 256:
         target_images = F.interpolate(target_images_orginal_illu, size=(256, 256), mode='area')
-    target_features = vgg16(target_images, resize_images=False, return_lpips=True).to(torch.device('cuda:1'))
-    vgg16 = vgg16.to(torch.device('cuda:1'))
-    deid_loss = deid_loss.to(torch.device('cuda:1'))
-    attr_loss = attr_loss.to(torch.device('cuda:1'))
-    target_images = target_images.to(torch.device('cuda:1'))
+    target_features = vgg16(target_images, resize_images=False, return_lpips=True).to(device)
+    vgg16 = vgg16.to(device)
+    deid_loss = deid_loss.to(device)
+    attr_loss = attr_loss.to(device)
+    target_images = target_images.to(device)
     torch.cuda.empty_cache()
 
     # start_w = np.repeat(start_w, G.backbone.mapping.num_ws, axis=1)
@@ -416,7 +384,7 @@ def project_pti(
 
         # w_noise = torch.randn_like(w_opt) * w_noise_scale
         # ws = (w_opt + w_noise)
-        synth_images = G.synthesis(w_pivot,c, noise_mode='const')['image'].to(torch.device('cuda:1'))
+        synth_images = G.synthesis(w_pivot,c, noise_mode='const')['image'].to(device)
         #synth_images size: [1, 3, 512, 512]
             
         if step % image_log_step == 0:
@@ -469,26 +437,18 @@ def project_pti(
         side_c = torch.cat([side_cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
         # G =G.to(torch.device('cuda:1'))
         # w_pivot = w_pivot.to(torch.device('cuda:1'))
-        side_synth_images = G.synthesis(w_pivot,side_c, noise_mode='const')['image'].to(torch.device('cuda:1'))
+        side_synth_images = G.synthesis(w_pivot,side_c, noise_mode='const')['image'].to(device)
         side_synth_images_print = (side_synth_images + 1) * (255 / 2)  # original size is 512
         side_synth_images = (side_synth_images + 1) /2.0
         side_synth_images = F.interpolate(side_synth_images, size=(512, 512), mode='area')
         # ################print out the sides views
         vis_img = side_synth_images_print.permute(0, 2, 3, 1).clamp(0, 255).to(torch.uint8)
         PIL.Image.fromarray(vis_img[0].cpu().numpy(), 'RGB').save(f'{outdir}/{step}.png')
-        #################
-        #diffusion loss
-        guidance = guidance.to(torch.device('cuda:1'))
-        text_inputs = guidance.get_text_embeds([text_prompt], [""])
-        d_loss,real_d_loss = guidance.train_step(text_inputs, side_synth_images, as_latent=False)
-        logging.info(str(step)+" d_loss: "+str(f'{real_d_loss.cpu().detach():.20f}'))
-        dist = dist.to(torch.device('cuda:1')) + d_loss[0] * weight_of_d_loss
-          
         ######################
         # illu loss
         sh = SH_project_polar_function(getLightIntensity,phi,theta)
         sh = np.array(sh) * 2.5
-        ill_loss = illu_loss(relight_model,sh,side_synth_images,torch.device('cuda:1')) #input sh (type numpy)
+        ill_loss = illu_loss(relight_model,sh,side_synth_images,device) #input sh (type numpy)
         logging.info(str(step)+" illu loss: "+str(f'{ill_loss.cpu().detach():.20f}'))
         
         dist = dist + ill_loss * weight_of_illu_loss
@@ -497,7 +457,7 @@ def project_pti(
         # Noise regularization.
         reg_loss = 0.0
         for v in noise_bufs.values():
-            noise = v[None, None, :, :].to(torch.device('cuda:1'))  # must be [1,1,H,W] for F.avg_pool2d()
+            noise = v[None, None, :, :].to(device)  # must be [1,1,H,W] for F.avg_pool2d()
             while True:
                 reg_loss += (noise * torch.roll(noise, shifts=1, dims=3)).mean() ** 2
                 reg_loss += (noise * torch.roll(noise, shifts=1, dims=2)).mean() ** 2
@@ -508,7 +468,7 @@ def project_pti(
 
         # Step
         optimizer.zero_grad(set_to_none=True)
-        loss.backward(retain_graph=True)
+        loss.backward()
         #torch.nn.utils.clip_grad_norm(w_opt, 1)
         optimizer.step()
         

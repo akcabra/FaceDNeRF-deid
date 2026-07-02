@@ -8,7 +8,7 @@ import torchvision.models as tv_models
 class GenderClassifier(nn.Module):
     def __init__(self, ckpt_path: str, num_classes: int = 2):
         super().__init__()
-        model = tv_models.resnet18(pretrained=False)
+        model = tv_models.resnet18(weights=None)
         model.fc = nn.Linear(model.fc.in_features, num_classes)
 
         state = torch.load(ckpt_path, map_location="cpu")
@@ -114,7 +114,7 @@ class DAN(nn.Module):
     def __init__(self, num_class: int = 8, num_head: int = 4):
         super(DAN, self).__init__()
 
-        resnet = tv_models.resnet18(pretrained=False)
+        resnet = tv_models.resnet18(weights=None)
         # Use all layers except avgpool and fc as the feature backbone
         self.features = nn.Sequential(*list(resnet.children())[:-2])
         self.num_head = num_head
@@ -176,15 +176,17 @@ class AttrLoss(nn.Module):
     ):
         super(AttrLoss, self).__init__()
 
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         print("Loading ResNet-18 gender classifier for gender loss")
         self.gender_net = GenderClassifier(gender_ckpt, gender_classes)
         self.gender_net.eval()
-        self.gender_net.cuda()
+        self.gender_net.to(device)
 
         print("Loading DAN expression classifier for expression loss")
         self.expr_net = ExprClassifier(expr_ckpt, expr_classes, expr_num_head)
         self.expr_net.eval()
-        self.expr_net.cuda()
+        self.expr_net.to(device)
 
         self.input_size = input_size
 
@@ -202,7 +204,11 @@ class AttrLoss(nn.Module):
             torch.tensor(self.STD).view(1, 3, 1, 1),
         )
 
+        self.to(device)
+
     def _preprocess(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.to(self.norm_mean.device)
+
         if x.shape[2] != 256:
             x = self.pool(x)
 

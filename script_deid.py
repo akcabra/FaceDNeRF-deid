@@ -67,11 +67,11 @@ for image_id in image_ids:
             f"--num_steps_pti {num_steps_pti} "
             f"--mode deid "
             f"--pp {cfg['pp']} "
-            f"--lamda_deid {cfg['lamda_deid']} "
-            f"--lamda_origin {cfg['lamda_origin']} "
-            f"--lamda_gender {cfg['lamda_gender']} "
-            f"--lamda_expr {cfg['lamda_expr']} "
-            f"--lamda_latent {cfg['lamda_latent']}"
+            f"--lambda_deid {cfg['lamda_deid']} "
+            f"--lambda_origin {cfg['lamda_origin']} "
+            f"--lambda_gender {cfg['lamda_gender']} "
+            f"--lambda_expr {cfg['lamda_expr']} "
+            f"--lambda_latent {cfg['lamda_latent']}"
         )
         print(command)
         os.system(command)

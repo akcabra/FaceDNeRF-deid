@@ -40,7 +40,6 @@ from criteria.id_loss import IDLoss
 from criteria.deid_loss import DeIDLoss
 from criteria.attr_loss import AttrLoss
 from criteria.illu_loss import illu_loss
-from criteria.sd import StableDiffusion
 # ----------------------------------------------------------------------------
 
 def parse_range(s: Union[str, List[int]]) -> List[int]:
@@ -188,25 +187,37 @@ def run(
     w_plus = w_plus_editor.project(
         G, c, outdir, id_image, device=torch.device('cuda'),
         w_avg_samples=600, w_name=image_name, num_steps=num_steps,
+        relight_model=relight_model,
+        illu_loss=illu_loss,
         deid_loss=deid_loss_fn, attr_loss=attr_loss_fn,
-        lambda_deid=lambda_deid, lambda_origin=lambda_origin,
+        lamda_origin=lambda_origin,
+        lamda_illumination=lambda_illumination,
+        lambda_deid=lambda_deid,
         lambda_gender=lambda_gender, lambda_expr=lambda_expr,
         lambda_latent=lambda_latent)
 
     G_final = w_plus_editor.project_pti(
         G, c, outdir, id_image, w_plus, device=torch.device('cuda'),
         w_avg_samples=600, w_name=image_name, num_steps_pti=num_steps_pti,
+        relight_model=relight_model,
+        illu_loss=illu_loss,
         deid_loss=deid_loss_fn, attr_loss=attr_loss_fn,
-        lambda_deid=lambda_deid, lambda_origin=lambda_origin,
-        lambda_gender=lambda_gender, lambda_expr=lambda_expr,
-        lambda_latent=lambda_latent)
+        lamda_origin=lambda_origin,
+        lamda_illumination=lambda_illumination,
+        lambda_deid=lambda_deid,
+        lambda_gender=lambda_gender, lambda_expr=lambda_expr)
     
     outdir_ckeckpoints = os.path.join(outdir,"checkpoints")
     os.makedirs(outdir_ckeckpoints, exist_ok=True)
     np.save(f'{outdir_ckeckpoints}/{image_name}.npy', w_plus.cpu().detach())
     
+    # Move every nn.Module in the dict to CPU before pickling so the checkpoint
+    # can be deserialized on CPU-only nodes (e.g. the video generation task).
+    network_data["G_ema"] = G_final.eval().requires_grad_(False).cpu()
+    for k, v in network_data.items():
+        if isinstance(v, torch.nn.Module):
+            network_data[k] = v.eval().requires_grad_(False).cpu()
     with open(f'{outdir_ckeckpoints}/fintuned_generator.pkl', 'wb') as f:
-        network_data["G_ema"] = G_final.eval().requires_grad_(False).cpu()
         pickle.dump(network_data, f)
     
     
