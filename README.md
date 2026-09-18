@@ -1,93 +1,107 @@
-# FaceDNeRF: Semantics-Driven Face Reconstruction, Prompt Editing and Relighting with Diffusion Models (NeurIPS 2023)
-![Picture1](https://github.com/BillyXYB/FDNeRF/assets/49705209/70f8c597-f9db-482c-b585-28709ff6f468)
+# CPP-DeID-inspired de-identification method with EG3D
 
+This repository contains a proof-of-concept method for controllable face de-identification with EG3D inspired by CPP-DeID. Given an EG3D-compatible face image and camera vector, the method:
 
-## Abstract
-The ability to create high-quality 3D faces from a single image has become in-
-creasingly important with wide applications in video conferencing, AR/VR, and
-advanced video editing in movie industries. In this paper, we propose Face Diffu-
-sion NeRF(FDNeRF), a new generative method to reconstruct high-quality Face
-NeRFs from single images, complete with semantic editing and relighting capabili-
-ties. FDNeRF utilizes high-resolution 3D GAN inversion and expertly trained 2D
-latent-diffusion model, allowing users to manipulate and construct Face NeRFs in
-zero-shot learning without the need for explicit 3D data. With carefully designed
-illumination and identity preserving loss, as well as multi-modal pre-training, FD-
-NeRF offers users unparalleled control over the editing process enabling them
-to create and edit face NeRFs using just single-view images, text prompts, and
-explicit target lighting. The advanced features of FDNeRF have been designed to
-produce more impressive results than existing 2D editing approaches that rely on
-2D segmentation maps for editable attributes. Experiments show that our FDNeRF
-achieves exceptionally realistic results and unprecedented flexibility in editing
-compared with state-of-the-art 3D face reconstruction and editing methods
+1. reconstructs the input in EG3D's W+ latent space;
+2. optimizes the reconstruction toward a requested ArcFace similarity (`pp`);
+3. preserves image structure, gender, and expression with auxiliary losses;
+4. optionally renders the de-identified identity from additional viewpoints.
 
-![pipeline](https://github.com/BillyXYB/FDNeRF/assets/49705209/5af0e7fe-806b-4f9a-a68b-092917753496)
+Lower `pp` values request a larger identity change. The implementation supports the CPP-DeID-inspired loss profile used in our evaluation and records the run configuration and stage metrics for reproducibility.
 
+## Origin of the code
 
-## Text-Conditioned 3D Editing on Single Image (include other domians)
-https://github.com/BillyXYB/FDNeRF/assets/49705209/a6e9a410-2487-41d5-ab77-23fc6992dff2
+This project is a direct fork of [FaceDNeRF](https://github.com/BillyXYB/FaceDNeRF), which itself builds on [EG3D](https://github.com/NVlabs/eg3d). A substantial part of the repository is therefore inherited code and was not written or used directly for this project. In particular, the EG3D generator, rendering infrastructure, W+ projection, pivotal tuning, and supporting modules originate from FaceDNeRF/EG3D.
 
+Our contribution is the staged de-identification pipeline, CPP-DeID-inspired losses, run tracking, independent evaluation, controllable input handling, and multi-view rendering/evaluation support. Unused original command-line utilities are retained under `facednerf_tools/` for provenance; they are not part of the reported workflow.
 
+## Repository layout
 
-
-
-## Explicit View-consistant 3D Relighting
-
-https://github.com/BillyXYB/FDNeRF/assets/49705209/e1c3fcef-7fe3-432f-b58c-60aa0a798dcb
-
-
-
-## Text-Condition Generation (include other domians)
-
-https://github.com/BillyXYB/FDNeRF/assets/49705209/caf123ce-a63a-4692-beed-be685d3b29a9
-
-## Requirements
-
-* We recommend Linux for performance and compatibility reasons.
-* 1&ndash;2 high-end NVIDIA GPUs. We have done all testing and development using V100s, RTX3090s and RTX4090s.
-* 64-bit Python 3.9, cuda11.3, and PyTorch 1.11.0 (or later). See https://pytorch.org for PyTorch install instructions.
-* Since we use the EG3D as our backbone, Please see **[eg3d](https://github.com/NVlabs/eg3d)** official repo for EG3D installation. Or directly install following conda environment.
-* Python libraries: see [environment.yml](./environment.yml) for exact library dependencies.  You can use the following commands with Anaconda3 to create and activate your Python environment:
-  - `cd FaceDNeRF`
-  - `conda env create -f environment.yml`
-  - `conda activate facednerf`
-
-## Data preparation
-
-We use the same camera pose convention as [eg3d](https://github.com/NVlabs/eg3d), please refer to this [script](https://github.com/NVlabs/eg3d/blob/main/dataset_preprocessing/ffhq/preprocess_in_the_wild.py) that can preprocess in-the-wild images compatible with our camera pose convention.
-
-We also provide test data in the `./test_data`
-
-## Download pre-trained models
-1. VGG16 pre-trained model: you can download vgg16.pt from https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/metrics/vgg16.pt and save it to `./network`.
-2. Since EG3D is the backbone of our model, please download the ffhqrebalanced512-64.pkl by the following command and place it under `./network`.
-```
-wget --content-disposition 'https://api.ngc.nvidia.com/v2/models/org/nvidia/team/research/eg3d/1/files?redirect=true&path=ffhqrebalanced512-128.pkl' -O ffhqrebalanced512-128.pkl
-```
-3. The ArcFace facial recognition network is used in the ID loss. The weights can be downloaded from [here](https://drive.google.com/file/d/1KW7bjndL3QG3sxBbZxreGHigcCCpsDgn/view?usp=sharing).
-
-## Image editing
-The backnone of this implementation is [eg3d](https://github.com/NVlabs/eg3d). For detailed instructions, please refer to the comments in the  `./script.py`
-
-```
-python script.py
+```text
+run.py                 Main reconstruction and de-identification entry point
+bash_scripts/          Slurm launch scripts
+criteria/              Identity, attribute, and preservation losses
+editors/               W+ optimization and pivotal tuning
+evaluation_models/     ArcFace and independent FaceNet wrappers
+scripts/               Evaluation, preprocessing, and multi-view tools
+evaluation/results/    Compact CSV results used in the report
+facednerf_tools/       Unused utilities inherited from FaceDNeRF/EG3D
+training/, torch_utils/,
+dnnlib/, legacy.py     Inherited EG3D runtime required to load and render models
 ```
 
-Results will be saved to `./output`. If you encounte the error: `Function 'PowBackward0' returned nan values in its 0th output.` caused by the `File "XXX/anaconda3/envs/facednerf/lib/python3.9/site-packages/kornia/color/rgb.py", line 199, in rgb_to_linear_rgb`, please replace the line 199 code: `lin_rgb: torch.Tensor = torch.where(image > 0.04045, torch.pow(((image + 0.055) / 1.055), 2.4), image / 12.92)` with `lin_rgb: torch.Tensor = torch.where(image > 0.04045, torch.pow(((image.abs() + 0.055) / 1.055), 2.4), image / 12.92)`.Since the `.abs()` function is added to ensure that the base number is positive, the torch.power function becomes differentiable, and the gradients can be passed through it.
+## Setup
 
-## Relight images
-we have provided some illumination functions `getLightIntensity`in the file `./editors/w_plus_editor.py`. If you want to customize you own illumination function, pleace also name it `getLightIntensity` and replace the original one.
+Create the provided Conda environment:
 
-## Paper & Citation
-Link to [**Paper**](https://arxiv.org/abs/2306.00783) 
-
-If you find this work useful for your research, please cite our paper:
-
-```bibtex
-@article{zhang2024facednerf,
-  title={FaceDNeRF: Semantics-Driven Face Reconstruction, Prompt Editing and Relighting with Diffusion Models},
-  author={Zhang, Hao and DAI, Tianyuan and Xu, Yanbo and Tai, Yu-Wing and Tang, Chi-Keung},
-  journal={Advances in Neural Information Processing Systems},
-  volume={36},
-  year={2024}
-}
+```bash
+conda env create -f environment.yml
+conda activate facednerf
 ```
+
+CUDA compilation of the EG3D operators requires a CUDA toolkit and compatible
+host compiler. The evaluation runs used Python 3.9, PyTorch 1.11, and CUDA 11.3.
+
+### Required model files
+
+Create `networks/` in the repository root and place the following files in it:
+
+```text
+networks/
+├── ffhqrebalanced512-128.pkl       Pretrained EG3D FFHQ generator
+├── vgg16.pt                        StyleGAN VGG feature extractor
+├── model_ir_se50.pth               ArcFace identity model
+├── gender_classifier.pth           CelebA-trained gender classifier
+├── affecnet8_epoch5_acc0.6209.pth  DAN expression classifier
+└── 20180402-114759-vggface2.pt     FaceNet model used only for evaluation
+```
+
+### Input format
+
+Each input must be an EG3D-compatible pair with the same filename stem:
+
+```text
+inputs/
+├── 00018.png   Aligned 512x512 RGB face image
+└── 00018.npy   Matching 25-dimensional EG3D camera vector
+```
+
+The image and camera vector must come from the same EG3D preprocessing result. Arbitrarily resizing or cropping an image without recomputing its camera vector causes poor inversion. Dataset files should be stored under `data/` or another local directory and should not be committed.
+
+## Running de-identification
+
+On a Slurm cluster, run one configuration with:
+
+```bash
+sbatch --export=ALL,IMAGE_ID=00018,INPUT_DIR=./inputs,PP=0.3,OUTDIR=./output_deid \
+  bash_scripts/slurm_deid.sh
+```
+
+The evaluation configuration defaults to 300 inversion steps, 500 de-identification steps, 400 pivotal-tuning steps, seed 42, and final images only. Parameters can be overridden through `sbatch --export`, including `NUM_STEPS`, `NUM_STEPS_INVERSION`, `NUM_STEPS_PTI`, `SEED`, and the loss coefficients defined in `bash_scripts/slurm_deid.sh`.
+
+Every run receives its own directory and contains:
+
+```text
+final.png             Final de-identified input-view image
+config.json           Complete run configuration
+metrics.json          Metrics and runtime for each stage
+inversion/final.png   Final Stage 1 reconstruction
+deid/final.png        Final W+ de-identification render
+post/final.png        Final render after pivotal tuning
+checkpoints/          Optimized latent and fine-tuned generator
+```
+
+Generated outputs and checkpoints can be very large and should not be committed.
+
+## Multi-view rendering
+
+Render fixed yaw views from one completed run with:
+
+```bash
+python scripts/render_multiview.py \
+  --run-dir PATH_TO_RUN \
+  --output-dir PATH_TO_OUTPUT
+```
+
+The renderer uses the saved W+ representation and fine-tuned generator while
+changing only the EG3D camera.

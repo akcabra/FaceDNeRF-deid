@@ -8,18 +8,16 @@
 # disclosure or distribution of this material and related documentation
 # without an express license agreement from NVIDIA CORPORATION or
 # its affiliates is strictly prohibited.
-#python run.py --outdir=projector_out --network=/disk1/haozhang/EG3D-diffusion_zh/eg3d/networks/ffhqrebalanced512-128.pkl --sample_mult=2  --image_path ./projector_test_data/00018.png --c_path ./projector_test_data/00018.npy
-
-#python gen_videos_from_given_latent_code.py --outdir=out --trunc=0.7 --npy_path ./projector_out/00018_w_plus/00018_w_plus.npy   --network=/disk1/haozhang/EG3D-diffusion/eg3d/networks/ffhqrebalanced512-128.pkl --sample_mult=2
-
-import sys
-sys.path.append('DPR_model')
-sys.path.append('DPR_utils')
 
 import os
 #os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+import datetime
+import json
+import random
 import re
-from typing import List, Optional, Tuple, Union
+import shutil
+import time
+from typing import Optional
 import pickle
 import click
 import dnnlib
@@ -28,49 +26,10 @@ import torch
 torch.autograd.set_detect_anomaly(True)
 import legacy
 from torchvision.transforms import transforms
-from torch.autograd import Variable
-from torchvision.utils import make_grid
 from editors import w_plus_editor
 from PIL import Image
-import cv2
-from utils_SH import *
-from defineHourglass_512_gray_skip import *
-#from criteria.clip_loss import CLIPLoss
-from criteria.id_loss import IDLoss
 from criteria.deid_loss import DeIDLoss
 from criteria.attr_loss import AttrLoss
-from criteria.illu_loss import illu_loss
-# ----------------------------------------------------------------------------
-
-def parse_range(s: Union[str, List[int]]) -> List[int]:
-    '''Parse a comma separated list of numbers or ranges and return a list of ints.
-    Example: '1,2,5-10' returns [1, 2, 5, 6, 7]
-    '''
-    if isinstance(s, list): return s
-    ranges = []
-    range_re = re.compile(r'^(\d+)-(\d+)$')
-    for p in s.split(','):
-        if m := range_re.match(p):
-            ranges.extend(range(int(m.group(1)), int(m.group(2)) + 1))
-        else:
-            ranges.append(int(p))
-    return ranges
-
-
-# ----------------------------------------------------------------------------
-
-def parse_tuple(s: Union[str, Tuple[int, int]]) -> Tuple[int, int]:
-    '''Parse a 'M,N' or 'MxN' integer tuple.
-    Example:
-        '4x2' returns (4,2)
-        '0,1' returns (0,1)
-    '''
-    if isinstance(s, tuple): return s
-    if m := re.match(r'^(\d+)[x,](\d+)$', s):
-        return (int(m.group(1)), int(m.group(2)))
-    raise ValueError(f'cannot parse tuple {s}')
-
- 
 # ----------------------------------------------------------------------------
 
 @click.command()
@@ -83,20 +42,15 @@ def parse_tuple(s: Union[str, Tuple[int, int]]) -> Tuple[int, int]:
 @click.option('--sample_mult', 'sampling_multiplier', type=float,
               help='Multiplier for depth sampling in volume rendering', default=2, show_default=True)
 @click.option('--num_steps', 'num_steps', type=int,
-              help='Multiplier for depth sampling in volume rendering', default=1000, show_default=True)
+              help='Number of Stage 2 de-identification steps', default=500, show_default=True)
 @click.option('--num_steps_pti', 'num_steps_pti', type=int,
-              help='Multiplier for depth sampling in volume rendering', default=400, show_default=True)
+              help='Number of pivotal-tuning steps', default=400, show_default=True)
+@click.option('--num_steps_inversion', type=int,
+              help='Reconstruction-only steps before de-identification in staged mode',
+              default=300, show_default=True)
 @click.option('--nrr', type=int, help='Neural rendering resolution override', default=None, show_default=True)
-#@click.option('--light_sh', 'light_sh',type=str, help='input the relight sh', default="a person with blue hair", show_default=True)
-@click.option('--description', 'description',type=str, help='input the text prompt', default="a lady with a pair of glasses", show_default=True)
-@click.option('--lambda_id', type=float,
-              help='id loss wright', default=0.6, show_default=True)
 @click.option('--lambda_origin', type=float,
-              help='origin loss wright', default=0.6, show_default=True)
-@click.option('--lambda_diffusion', type=float,
-              help='diffusion loss wright', default=6e-05, show_default=True) #9e-05
-@click.option('--lambda_illumination', type=float,
-              help='illumination loss weight', default=0.0, show_default=True)
+              help='Pixel reconstruction loss weight', default=1.0, show_default=True)
 @click.option('--pp', type=float,
               help='Privacy parameter for de-id [0=max privacy, 1=min]', default=0.0, show_default=True)
 @click.option('--lambda_deid', type=float,
@@ -107,8 +61,28 @@ def parse_tuple(s: Union[str, Tuple[int, int]]) -> Tuple[int, int]:
               help='Expression preservation loss weight', default=0.01, show_default=True)
 @click.option('--lambda_latent', type=float,
               help='Latent regularizer loss weight', default=0.0016, show_default=True)
-@click.option('--mode', type=click.Choice(['deid', 'edit']),
-              help='Mode: deid (de-identification) or edit (original editing)', default='deid', show_default=True)
+@click.option('--seed', type=int, default=42, show_default=True,
+              help='Random seed for Python, NumPy, and PyTorch')
+@click.option('--run_name', type=str, default=None,
+              help='Optional unique run directory name (safe filename characters only)')
+@click.option('--lambda_inversion_perceptual', type=float, default=0.8,
+              show_default=True, help='VGG perceptual weight used only in Stage 1')
+@click.option('--lambda_inversion_identity', type=float, default=0.1,
+              show_default=True, help='ArcFace identity-preservation weight used only in Stage 1')
+@click.option('--lambda_stage2_perceptual', type=float, default=0.4,
+              show_default=True, help='VGG perceptual-preservation weight used only in Stage 2')
+@click.option('--gradient_log_interval', type=click.IntRange(min=0), default=0,
+              show_default=True,
+              help='Log per-loss W+ gradient norms in Stage 2 every N steps; 0 disables')
+@click.option('--stage2_latent_noise/--no-stage2_latent_noise', default=True,
+              show_default=True,
+              help='Enable decaying W+ perturbation during Stage 2')
+@click.option('--stage2_pixel_resolution', type=click.Choice(['256', '512']),
+              default='512', show_default=True,
+              help='Resolution used by the Stage 2 pixel reconstruction loss')
+@click.option('--save-progress-images/--final-images-only', default=True,
+              show_default=True,
+              help='Save every optimization render or only stage-final renders')
 def run(
         network_pkl: str,
         outdir: str,
@@ -118,36 +92,79 @@ def run(
         c_path:str,
         num_steps:int,
         num_steps_pti:int,
-        description:str,
-        lambda_id: float,
+        num_steps_inversion:int,
         lambda_origin: float,
-        lambda_diffusion: float,
-        lambda_illumination: float,
         pp: float,
         lambda_deid: float,
         lambda_gender: float,
         lambda_expr: float,
         lambda_latent: float,
-        mode: str,
+        seed: int,
+        run_name: Optional[str],
+        lambda_inversion_perceptual: float,
+        lambda_inversion_identity: float,
+        lambda_stage2_perceptual: float,
+        gradient_log_interval: int,
+        stage2_latent_noise: bool,
+        stage2_pixel_resolution: str,
+        save_progress_images: bool,
 ):
-    """Render a latent vector interpolation video.
-    Examples:
-    \b
-    # Render a 4x2 grid of interpolations for seeds 0 through 31.
-    python gen_video.py --output=lerp.mp4 --trunc=1 --seeds=0-31 --grid=4x2 \\
-        --network=https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-r-afhqv2-512x512.pkl
-    Animation length and seed keyframes:
-    The animation length is either determined based on the --seeds value or explicitly
-    specified using the --num-keyframes option.
-    When num keyframes is specified with --num-keyframes, the output video length
-    will be 'num_keyframes*w_frames' frames.
-    If --num-keyframes is not specified, the number of seeds given with
-    --seeds must be divisible by grid size W*H (--grid).  In this case the
-    output video length will be '# seeds/(w*h)*w_frames' frames.
-    """
+    """Reconstruct and de-identify one EG3D-compatible face image."""
     
     
-    os.makedirs(outdir, exist_ok=True)
+    if run_name is None:
+        run_name = datetime.datetime.now().strftime('run_%Y%m%d_%H%M%S_%f')
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+', run_name):
+        raise click.BadParameter(
+            'use only letters, numbers, dot, underscore, and hyphen',
+            param_hint='--run_name')
+    if (lambda_inversion_perceptual < 0 or lambda_inversion_identity < 0 or
+            lambda_stage2_perceptual < 0):
+        raise click.BadParameter('Perceptual and identity loss weights must be non-negative')
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+
+    image_name = os.path.splitext(os.path.basename(image_path))[0]
+    configuration_name = (
+        f'{image_name}_deid_staged_cpp_pp{pp}_deid{lambda_deid}_'
+        f'origin{lambda_origin}_gender{lambda_gender}_expr{lambda_expr}_'
+        f'latent{lambda_latent}_invvgg{lambda_inversion_perceptual}_'
+        f'invid{lambda_inversion_identity}_deidvgg{lambda_stage2_perceptual}_'
+        f'deidpx{stage2_pixel_resolution}')
+    outdir = os.path.join(outdir, configuration_name, run_name)
+    try:
+        os.makedirs(outdir, exist_ok=False)
+    except FileExistsError as exc:
+        raise click.ClickException(
+            f'run directory already exists: {outdir}; choose another --run_name') from exc
+    print(f'Run output: {os.path.abspath(outdir)}')
+
+    run_config = {
+        'network': network_pkl, 'image_path': image_path, 'c_path': c_path,
+        'sampling_multiplier': sampling_multiplier, 'nrr': nrr,
+        'num_steps': num_steps, 'num_steps_pti': num_steps_pti,
+        'num_steps_inversion': num_steps_inversion, 'seed': seed,
+        'pp': pp, 'lambda_deid': lambda_deid,
+        'lambda_origin': lambda_origin, 'lambda_gender': lambda_gender,
+        'lambda_expr': lambda_expr, 'lambda_latent': lambda_latent,
+        'lambda_inversion_perceptual': lambda_inversion_perceptual,
+        'lambda_inversion_identity': lambda_inversion_identity,
+        'lambda_stage2_perceptual': lambda_stage2_perceptual,
+        'gradient_log_interval': gradient_log_interval,
+        'pipeline': 'staged',
+        'stage2_inject_latent_noise': stage2_latent_noise,
+        'stage2_pixel_resolution': int(stage2_pixel_resolution),
+        'save_progress_images': save_progress_images,
+        'run_name': run_name,
+    }
+    with open(os.path.join(outdir, 'config.json'), 'w', encoding='utf-8') as f:
+        json.dump(run_config, f, indent=2)
+
     print('Loading networks from "%s"...' % network_pkl)
     device = torch.device('cuda')
     with dnnlib.util.open_url(network_pkl) as f:
@@ -160,7 +177,6 @@ def run(
     if nrr is not None: G.neural_rendering_resolution = nrr
 
     image = Image.open(image_path).convert('RGB')
-    image_name = os.path.basename(image_path)[:-4]
     c = np.load(c_path)
     c = np.reshape(c,(1,25))
 
@@ -175,41 +191,92 @@ def run(
     id_image = torch.squeeze((from_im.cuda() + 1) / 2) * 255
 
    
-    relight_model = HourglassNet()
-    relight_model.load_state_dict(torch.load("./networks/trained_model_03.t7"))
-    relight_model = relight_model.to(torch.device('cuda'))
-
     deid_loss_fn = DeIDLoss(pp=pp)
     attr_loss_fn = AttrLoss()
-    outdir = os.path.join(outdir, f"{image_name}_deid_pp{pp}_{lambda_deid}_{lambda_origin}_{lambda_gender}_{lambda_expr}")
-    os.makedirs(outdir, exist_ok=True)
+    checkpoint_dir = os.path.join(outdir, "checkpoints")
+    os.makedirs(checkpoint_dir, exist_ok=True)
 
+    stage_metrics = []
+    print(f'Stage 1/3: reconstructing input pivot ({num_steps_inversion} steps)...')
+    torch.cuda.synchronize()
+    stage_started = time.perf_counter()
+    input_pivot = w_plus_editor.project(
+        G, c, outdir, id_image, device=torch.device('cuda'),
+        w_avg_samples=600, w_name=image_name, num_steps=num_steps_inversion,
+        deid_loss=deid_loss_fn, attr_loss=attr_loss_fn,
+        lamda_origin=1.0,
+        lambda_deid=0.0, lambda_gender=0.0, lambda_expr=0.0,
+        lambda_latent=0.0,
+        stage_name='inversion', enable_privacy=False,
+        optimize_noise=False,
+        lambda_perceptual=lambda_inversion_perceptual,
+        lambda_identity_preservation=lambda_inversion_identity,
+        full_resolution_pixel=True,
+        save_progress_images=save_progress_images)
+    torch.cuda.synchronize()
+    stage_seconds = time.perf_counter() - stage_started
+    np.save(
+        f'{checkpoint_dir}/{image_name}_input.npy',
+        input_pivot.cpu().detach())
+    w_avg = np.load('./w_avg.npy').astype(np.float32)
+    inversion_reference = w_plus_editor.prepare_w_plus(
+        w_avg, w_avg, G.backbone.mapping.num_ws, device)
+    stage_metrics.append(w_plus_editor.save_stage_result(
+        G, c, id_image, input_pivot, inversion_reference,
+        deid_loss_fn, attr_loss_fn, outdir, 'inversion', stage_seconds,
+        device))
+    print(f'Stage 2/3: de-identifying from the reconstructed pivot ({num_steps} steps)...')
+
+    torch.cuda.synchronize()
+    stage_started = time.perf_counter()
     w_plus = w_plus_editor.project(
         G, c, outdir, id_image, device=torch.device('cuda'),
         w_avg_samples=600, w_name=image_name, num_steps=num_steps,
-        relight_model=relight_model,
-        illu_loss=illu_loss,
+        initial_w=input_pivot,
         deid_loss=deid_loss_fn, attr_loss=attr_loss_fn,
         lamda_origin=lambda_origin,
-        lamda_illumination=lambda_illumination,
         lambda_deid=lambda_deid,
         lambda_gender=lambda_gender, lambda_expr=lambda_expr,
-        lambda_latent=lambda_latent)
+        lambda_latent=lambda_latent,
+        stage_name='deid',
+        enable_privacy=True, optimize_noise=False,
+        inject_latent_noise=stage2_latent_noise,
+        lambda_perceptual=lambda_stage2_perceptual,
+        full_resolution_pixel=(stage2_pixel_resolution == '512'),
+        gradient_log_interval=gradient_log_interval,
+        save_progress_images=save_progress_images)
+    torch.cuda.synchronize()
+    stage_seconds = time.perf_counter() - stage_started
+    w_avg = np.load('./w_avg.npy').astype(np.float32)
+    deid_reference = input_pivot
+    deid_stage_name = 'deid'
+    stage_metrics.append(w_plus_editor.save_stage_result(
+        G, c, id_image, w_plus, deid_reference, deid_loss_fn, attr_loss_fn,
+        outdir, deid_stage_name, stage_seconds, device))
 
+    print(f'Stage 3/3: fine-tuning generator ({num_steps_pti} steps)...')
+    torch.cuda.synchronize()
+    stage_started = time.perf_counter()
     G_final = w_plus_editor.project_pti(
         G, c, outdir, id_image, w_plus, device=torch.device('cuda'),
         w_avg_samples=600, w_name=image_name, num_steps_pti=num_steps_pti,
-        relight_model=relight_model,
-        illu_loss=illu_loss,
         deid_loss=deid_loss_fn, attr_loss=attr_loss_fn,
         lamda_origin=lambda_origin,
-        lamda_illumination=lambda_illumination,
         lambda_deid=lambda_deid,
-        lambda_gender=lambda_gender, lambda_expr=lambda_expr)
+        lambda_gender=lambda_gender, lambda_expr=lambda_expr,
+        save_progress_images=save_progress_images)
+    torch.cuda.synchronize()
+    stage_seconds = time.perf_counter() - stage_started
+    stage_metrics.append(w_plus_editor.save_stage_result(
+        G_final, c, id_image, w_plus, deid_reference, deid_loss_fn,
+        attr_loss_fn, outdir, 'post', stage_seconds, device))
+    shutil.copy2(
+        os.path.join(outdir, 'post', 'final.png'),
+        os.path.join(outdir, 'final.png'))
+    with open(os.path.join(outdir, 'metrics.json'), 'w', encoding='utf-8') as f:
+        json.dump({'seed': seed, 'stages': stage_metrics}, f, indent=2)
     
-    outdir_ckeckpoints = os.path.join(outdir,"checkpoints")
-    os.makedirs(outdir_ckeckpoints, exist_ok=True)
-    np.save(f'{outdir_ckeckpoints}/{image_name}.npy', w_plus.cpu().detach())
+    np.save(f'{checkpoint_dir}/{image_name}.npy', w_plus.cpu().detach())
     
     # Move every nn.Module in the dict to CPU before pickling so the checkpoint
     # can be deserialized on CPU-only nodes (e.g. the video generation task).
@@ -217,7 +284,7 @@ def run(
     for k, v in network_data.items():
         if isinstance(v, torch.nn.Module):
             network_data[k] = v.eval().requires_grad_(False).cpu()
-    with open(f'{outdir_ckeckpoints}/fintuned_generator.pkl', 'wb') as f:
+    with open(f'{checkpoint_dir}/fintuned_generator.pkl', 'wb') as f:
         pickle.dump(network_data, f)
     
     
@@ -232,4 +299,3 @@ if __name__ == "__main__":
     run()  # pylint: disable=no-value-for-parameter
 
 # ----------------------------------------------------------------------------
-

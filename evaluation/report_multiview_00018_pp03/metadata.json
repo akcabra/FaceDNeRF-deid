@@ -1,0 +1,30 @@
+{
+  "run_dir": "/d/hpc/home/ak1790/mag/SB/FaceDNeRF-deid/output_final_evaluation/00018_deid_staged_cpp_pp0.3_deid2.5_origin1.0_gender0.01_expr0.01_latent0.0016_invvgg0.8_invid0.1_deidvgg0.4_deidpx512/job_19431176_seed42",
+  "generator": "/d/hpc/home/ak1790/mag/SB/FaceDNeRF-deid/output_final_evaluation/00018_deid_staged_cpp_pp0.3_deid2.5_origin1.0_gender0.01_expr0.01_latent0.0016_invvgg0.8_invid0.1_deidvgg0.4_deidpx512/job_19431176_seed42/checkpoints/fintuned_generator.pkl",
+  "latent": "/d/hpc/home/ak1790/mag/SB/FaceDNeRF-deid/output_final_evaluation/00018_deid_staged_cpp_pp0.3_deid2.5_origin1.0_gender0.01_expr0.01_latent0.0016_invvgg0.8_invid0.1_deidvgg0.4_deidpx512/job_19431176_seed42/checkpoints/00018.npy",
+  "base_camera": "/d/hpc/home/ak1790/mag/SB/FaceDNeRF-deid/data/ffhq-dataset-v2/processed/00018.npy",
+  "camera_protocol": "yaw offsets around the input camera and EG3D average pivot",
+  "views": [
+    {
+      "yaw_offset_degrees": -30.0,
+      "image": "yaw_m30.png"
+    },
+    {
+      "yaw_offset_degrees": -15.0,
+      "image": "yaw_m15.png"
+    },
+    {
+      "yaw_offset_degrees": 0.0,
+      "image": "yaw_p0.png"
+    },
+    {
+      "yaw_offset_degrees": 15.0,
+      "image": "yaw_p15.png"
+    },
+    {
+      "yaw_offset_degrees": 30.0,
+      "image": "yaw_p30.png"
+    }
+  ],
+  "strip": "strip.png"
+}

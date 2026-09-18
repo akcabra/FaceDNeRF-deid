@@ -8,7 +8,7 @@ import torchvision.models as tv_models
 class GenderClassifier(nn.Module):
     def __init__(self, ckpt_path: str, num_classes: int = 2):
         super().__init__()
-        model = tv_models.resnet18(weights=None)
+        model = tv_models.resnet18(pretrained=False)
         model.fc = nn.Linear(model.fc.in_features, num_classes)
 
         state = torch.load(ckpt_path, map_location="cpu")
@@ -23,6 +23,14 @@ class GenderClassifier(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)
+
+    def forward_features(self, x: torch.Tensor) -> torch.Tensor:
+        # CPP-DeID Eq. (7) uses the 512-D representation before the classifier.
+        for name, module in self.model.named_children():
+            if name == "fc":
+                break
+            x = module(x)
+        return torch.flatten(x, 1)
 
 
 # ======================================================================
@@ -114,7 +122,7 @@ class DAN(nn.Module):
     def __init__(self, num_class: int = 8, num_head: int = 4):
         super(DAN, self).__init__()
 
-        resnet = tv_models.resnet18(weights=None)
+        resnet = tv_models.resnet18(pretrained=False)
         # Use all layers except avgpool and fc as the feature backbone
         self.features = nn.Sequential(*list(resnet.children())[:-2])
         self.num_head = num_head
@@ -158,6 +166,10 @@ class ExprClassifier(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)
+
+    def forward_features(self, x: torch.Tensor) -> torch.Tensor:
+        # CPP-DeID Eq. (8) uses the DAN backbone representation [B,512,7,7].
+        return self.model.features(x)
 
 
 class AttrLoss(nn.Module):
@@ -231,20 +243,18 @@ class AttrLoss(nn.Module):
         y_pre = self._preprocess(y)
         y_hat_pre = self._preprocess(y_hat)
 
-        # Gender loss (Eq. 7)
+        # Preserve the intermediate gender and expression representations.
         with torch.no_grad():
-            g_t = self.gender_net(y_pre)
-        g_g = self.gender_net(y_hat_pre)
+            g_t = self.gender_net.forward_features(y_pre)
+            e_t = self.expr_net.forward_features(y_pre)
+        g_g = self.gender_net.forward_features(y_hat_pre)
+        e_g = self.expr_net.forward_features(y_hat_pre)
+        return F.mse_loss(g_g, g_t), F.mse_loss(e_g, e_t)
 
-        n_gd = g_t.shape[1]
-        gender_loss = (g_t - g_g).square().sum(dim=1).mean() / n_gd
-
-        # Expression loss (Eq. 8)
-        with torch.no_grad():
-            e_t = self.expr_net(y_pre)
-        e_g = self.expr_net(y_hat_pre)
-
-        n_ex = e_t.shape[1]
-        expr_loss = (e_t - e_g).square().sum(dim=1).mean() / n_ex
-
-        return gender_loss, expr_loss
+    @torch.no_grad()
+    def predict_classes(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return gender and expression class indices for reporting only."""
+        x_pre = self._preprocess(x)
+        gender = self.gender_net(x_pre).argmax(dim=1)
+        expression = self.expr_net(x_pre).argmax(dim=1)
+        return gender, expression

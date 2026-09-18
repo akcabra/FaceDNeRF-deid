@@ -7,6 +7,8 @@ from models.facial_recognition.model_irse import Backbone
 class DeIDLoss(nn.Module):
     def __init__(self, pp: float = 0.0):
         super(DeIDLoss, self).__init__()
+        if not 0.0 <= pp <= 1.0:
+            raise ValueError(f"pp must be in [0, 1], got {pp}")
         self.pp = pp
 
         print('Loading ResNet ArcFace for de-identification loss')
@@ -26,23 +28,21 @@ class DeIDLoss(nn.Module):
         x_feats = self.facenet(x)
         return x_feats
 
-    # Loss calculation follows "Face deidentification with controllable privacy protection" Eq. (6)
-    def forward(self, y_hat: torch.Tensor, y: torch.Tensor):
-        n_samples = y.shape[0]
+    def similarity(self, y_hat: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        """Return normalized ArcFace cosine similarity for each image pair."""
+        y_feats = torch.nn.functional.normalize(
+            self.extract_feats(y).detach(), dim=1)
+        y_hat_feats = torch.nn.functional.normalize(self.extract_feats(y_hat), dim=1)
+        return (y_feats * y_hat_feats).sum(dim=1)
 
+    def forward(self, y_hat: torch.Tensor, y: torch.Tensor):
         y_feats = self.extract_feats(y).detach()
         y_hat_feats = self.extract_feats(y_hat)
 
-        loss = torch.tensor(0.0, device=y.device)
-        total_dist = torch.tensor(0.0, device=y.device)
-
-        for i in range(n_samples):
-            dist = (y_feats[i] - y_hat_feats[i]).square().sum()
-            total_dist = total_dist + dist
-
-            loss = loss + torch.clamp(self.pp - dist, min=0.0)
-
-        loss = loss / n_samples
-        mean_dist = total_dist / n_samples
-
-        return loss, mean_dist
+        # Use normalized ArcFace cosine similarity as the controllable score.
+        # Lower pp values request stronger identity modification.
+        y_feats = torch.nn.functional.normalize(y_feats, dim=1)
+        y_hat_feats = torch.nn.functional.normalize(y_hat_feats, dim=1)
+        similarity = (y_feats * y_hat_feats).sum(dim=1)
+        loss = (similarity - self.pp).square().mean()
+        return loss, similarity.mean()

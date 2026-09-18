@@ -18,7 +18,6 @@ The best model (by validation accuracy) is saved to
 """
 
 import argparse
-import csv
 import os
 import time
 
@@ -37,28 +36,64 @@ class CelebAGender(Dataset):
     def __init__(self, data_dir: str, split: str, transform=None):
         super().__init__()
         assert split in self.SPLIT_MAP
-        self.img_dir = os.path.join(data_dir, "img_align_celeba", "img_align_celeba")
+        nested_img_dir = os.path.join(data_dir, "img_align_celeba", "img_align_celeba")
+        flat_img_dir = os.path.join(data_dir, "img_align_celeba")
+        if os.path.isdir(nested_img_dir):
+            self.img_dir = nested_img_dir
+        else:
+            self.img_dir = flat_img_dir
         self.transform = transform
 
-        # Read partition file
-        partition_path = os.path.join(data_dir, "list_eval_partition.csv")
-        partitions = {}
-        with open(partition_path, "r") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                partitions[row["image_id"]] = int(row["partition"])
+        partitions = self._read_partitions(data_dir)
+        male_labels = self._read_male_labels(data_dir)
 
-        # Read attribute file — "Male" column; values are -1/1, map to 0/1
-        attr_path = os.path.join(data_dir, "list_attr_celeba.csv")
         self.samples = []
         split_id = self.SPLIT_MAP[split]
-        with open(attr_path, "r") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                fname = row["image_id"]
-                if partitions.get(fname) == split_id:
-                    gender = 1 if int(row["Male"]) == 1 else 0
-                    self.samples.append((fname, gender))
+        for fname, gender in male_labels.items():
+            if partitions.get(fname) == split_id:
+                self.samples.append((fname, gender))
+
+    @staticmethod
+    def _read_partitions(data_dir: str) -> dict[str, int]:
+        csv_path = os.path.join(data_dir, "list_eval_partition.csv")
+        txt_path = os.path.join(data_dir, "list_eval_partition.txt")
+        path = csv_path if os.path.exists(csv_path) else txt_path
+        partitions = {}
+        with open(path, "r") as f:
+            first = f.readline().strip()
+            if first and not first.startswith("image_id"):
+                parts = first.replace(",", " ").split()
+                partitions[parts[0]] = int(parts[1])
+            for line in f:
+                parts = line.strip().replace(",", " ").split()
+                if len(parts) >= 2 and parts[0] != "image_id":
+                    partitions[parts[0]] = int(parts[1])
+        return partitions
+
+    @staticmethod
+    def _read_male_labels(data_dir: str) -> dict[str, int]:
+        csv_path = os.path.join(data_dir, "list_attr_celeba.csv")
+        txt_path = os.path.join(data_dir, "list_attr_celeba.txt")
+
+        if os.path.exists(csv_path):
+            import csv
+            with open(csv_path, "r") as f:
+                reader = csv.DictReader(f)
+                return {
+                    row["image_id"]: 1 if int(row["Male"]) == 1 else 0
+                    for row in reader
+                }
+
+        with open(txt_path, "r") as f:
+            _ = f.readline()
+            header = f.readline().strip().split()
+            male_idx = header.index("Male")
+            labels = {}
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) > male_idx + 1:
+                    labels[parts[0]] = 1 if int(parts[male_idx + 1]) == 1 else 0
+            return labels
 
     def __len__(self):
         return len(self.samples)

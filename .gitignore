@@ -28,3 +28,9 @@ dataset_preprocessing
 
 logs/
 networks/
+
+mds/
+documents/
+runs/
+.agents/
+.codex/
